@@ -145,56 +145,61 @@ def sync_lawyers(test_mode=True):
             break
             
         for item in data:
-            # 1. UPSERT LAW FIRM
-            firm_id = item.get("LawFirmID")
-            db_firm_id = None
-            if firm_id:
-                firm = session.query(LawFirm).filter_by(exparte_firm_id=firm_id).first()
-                if not firm:
-                    firm = LawFirm(
-                        exparte_firm_id=firm_id,
-                        name=item.get("LawFirmName", "Unknown"),
-                        firm_type=item.get("FirmType"),
-                        jurisdiction="US"
-                    )
-                    session.add(firm)
-                    session.flush() # Get the new ID
-                db_firm_id = firm.id
+            # Use no_autoflush to prevent SQLAlchemy from auto-flushing pending
+            # attorney objects when we explicitly flush a new Law Firm to get its ID.
+            # Without this, a pending new Attorney in the same batch could be
+            # accidentally INSERTed twice, causing a UniqueViolation on the PK.
+            with session.no_autoflush:
+                # 1. UPSERT LAW FIRM
+                firm_id = item.get("LawFirmID")
+                db_firm_id = None
+                if firm_id:
+                    firm = session.query(LawFirm).filter_by(exparte_firm_id=firm_id).first()
+                    if not firm:
+                        firm = LawFirm(
+                            exparte_firm_id=firm_id,
+                            name=item.get("LawFirmName", "Unknown"),
+                            firm_type=item.get("FirmType"),
+                            jurisdiction="US"
+                        )
+                        session.add(firm)
+                        session.flush() # Get the new ID safely, without touching attorneys
+                    db_firm_id = firm.id
 
-            # 2. UPSERT ATTORNEY
-            lawyer_id = item.get("LawyerID")
-            attorney = session.query(Attorney).filter_by(exparte_lawyer_id=lawyer_id).first()
-            
-            if attorney:
-                # Update existing records to keep stats fresh
-                attorney.experience = clean_int(item.get("Experience"))
-                attorney.expertise = parse_expertise(item.get("Expertise"))
-                attorney.dct_rating = item.get("dctRating")
-                attorney.ptab_rating = item.get("ptabRating")
-                attorney.cafc_rating = item.get("cafcRating")
-                updates += 1
-            else:
-                # Insert brand new attorney
-                attorney = Attorney(
-                    exparte_lawyer_id=lawyer_id,
-                    name=item.get("LawyerName"),
-                    law_firm_id=db_firm_id,
-                    jurisdiction="US",
-                    experience=clean_int(item.get("Experience")),
-                    expertise=parse_expertise(item.get("Expertise")),
-                    firm_type=item.get("FirmType"),
-                    cafc_experience=clean_int(item.get("cafcExperience")),
-                    cafc_rating=item.get("cafcRating"),
-                    cafc_trend=item.get("cafcTrend"),
-                    dct_experience=clean_int(item.get("dctExperience")),
-                    dct_rating=item.get("dctRating"),
-                    dct_trend=item.get("dctTrend"),
-                    ptab_experience=clean_int(item.get("ptabExperience")),
-                    ptab_rating=item.get("ptabRating"),
-                    ptab_trend=item.get("ptabTrend")
-                )
-                session.add(attorney)
-                new_inserts += 1
+                # 2. UPSERT ATTORNEY
+                lawyer_id = item.get("LawyerID")
+                attorney = session.query(Attorney).filter_by(exparte_lawyer_id=lawyer_id).first()
+
+                if attorney:
+                    # Update existing records to keep stats fresh
+                    attorney.experience = clean_int(item.get("Experience"))
+                    attorney.expertise = parse_expertise(item.get("Expertise"))
+                    attorney.dct_rating = item.get("dctRating")
+                    attorney.ptab_rating = item.get("ptabRating")
+                    attorney.cafc_rating = item.get("cafcRating")
+                    updates += 1
+                else:
+                    # Insert brand new attorney
+                    attorney = Attorney(
+                        exparte_lawyer_id=lawyer_id,
+                        name=item.get("LawyerName"),
+                        law_firm_id=db_firm_id,
+                        jurisdiction="US",
+                        experience=clean_int(item.get("Experience")),
+                        expertise=parse_expertise(item.get("Expertise")),
+                        firm_type=item.get("FirmType"),
+                        cafc_experience=clean_int(item.get("cafcExperience")),
+                        cafc_rating=item.get("cafcRating"),
+                        cafc_trend=item.get("cafcTrend"),
+                        dct_experience=clean_int(item.get("dctExperience")),
+                        dct_rating=item.get("dctRating"),
+                        dct_trend=item.get("dctTrend"),
+                        ptab_experience=clean_int(item.get("ptabExperience")),
+                        ptab_rating=item.get("ptabRating"),
+                        ptab_trend=item.get("ptabTrend")
+                    )
+                    session.add(attorney)
+                    new_inserts += 1
 
         # Commit at the end of every page to save progress safely
         session.commit()
